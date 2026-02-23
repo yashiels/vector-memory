@@ -12,10 +12,10 @@ Give Claude Code a long-term memory. It searches your codebase by meaning (not j
 ┌─────────────────────────────────────────────────────┐
 │                  Claude Code Session                │
 │                                                     │
-│  ┌──────────────┐  MCP tools  ┌─────────────────┐  │
-│  │  qdrant-mcp  │◄───────────►│  Qdrant Docker  │  │
-│  │  server      │             │  :6333          │  │
-│  └──────────────┘             └─────────────────┘  │
+│  ┌──────────────┐  MCP tools  ┌─────────────────┐   │
+│  │  qdrant-mcp  │◄───────────►│  Qdrant Docker  │   │
+│  │  server      │             │  :6333          │   │
+│  └──────────────┘             └─────────────────┘   │
 │                                     ▲               │
 │                          index_codebase.py          │
 │                          (embeds your source files) │
