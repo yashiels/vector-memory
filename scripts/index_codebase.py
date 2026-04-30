@@ -45,6 +45,7 @@ CHUNK_MIN = 40       # start looking for boundary after this many lines
 CHUNK_MAX = 80       # hard split if no boundary found
 CHUNK_FALLBACK = 60  # split point when no boundary found within window
 CHUNK_OVERLAP = 5    # lines of overlap before boundary
+MAX_FILE_LINES = 5000  # skip files larger than this (generated/vendored)
 
 STATE_FILE = Path(__file__).parent / ".qdrant-index-state.json"
 
@@ -60,11 +61,19 @@ EXCLUDE_DIRS = {
     "build", ".gradle", "node_modules", ".git",
     ".idea", "generated", "intermediates", "__pycache__",
     ".kotlin", "caches", ".venv", "venv", "dist", ".next",
-    "target", ".terraform",
+    "target", ".terraform", ".turbo", ".astro", ".firebase",
+    "coverage", ".nyc_output", ".cache", ".parcel-cache",
 }
 
 EXCLUDE_FILES = {
     ".qdrant-index-state.json",
+    "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb",
+    "Cargo.lock", "Gemfile.lock", "poetry.lock", "composer.lock",
+}
+
+EXCLUDE_FILE_PATTERNS = {
+    "*.min.js", "*.min.css", "*.generated.*", "*.d.ts.map",
+    "*-manifest.json", "*-meta.json",
 }
 
 # Regex patterns that indicate natural chunk boundaries (start of a new logical block)
@@ -124,8 +133,17 @@ def _is_boundary(line: str, language: str) -> bool:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _matches_glob(name: str, pattern: str) -> bool:
+    """Simple glob matching for *.ext and *-suffix patterns."""
+    if pattern.startswith("*"):
+        return name.endswith(pattern[1:])
+    return name == pattern
+
+
 def should_index(path: Path) -> bool:
     if path.name in EXCLUDE_FILES:
+        return False
+    if any(_matches_glob(path.name, p) for p in EXCLUDE_FILE_PATTERNS):
         return False
     if path.suffix not in INCLUDE_EXTENSIONS:
         return False
@@ -143,8 +161,13 @@ def chunk_file(path: Path) -> list[dict]:
         return []
 
     lines = text.splitlines()
-    if not lines:
+    if not lines or len(lines) > MAX_FILE_LINES:
         return []
+
+    try:
+        rel_path = str(path.relative_to(WORKSPACE))
+    except ValueError:
+        rel_path = path.name
 
     language = path.suffix.lstrip(".")
     chunks = []
@@ -169,22 +192,22 @@ def chunk_file(path: Path) -> list[dict]:
         chunk_text = "\n".join(lines[start:end])
         if chunk_text.strip():
             chunk_id = hashlib.sha256(
-                f"{path}:{start}:{end}:{chunk_text}".encode()
+                f"{rel_path}:{start}:{end}:{chunk_text}".encode()
             ).hexdigest()
 
             try:
-                rel = path.relative_to(WORKSPACE)
-                repo = rel.parts[0] if len(rel.parts) > 1 else path.name
-            except ValueError:
+                repo = rel_path.split(os.sep)[0] if os.sep in rel_path else path.name
+            except (IndexError, ValueError):
                 repo = path.name
 
-            doc = f"File: {path}\nLines: {start+1}-{end}\n\n{chunk_text}"
+            doc = f"File: {rel_path}\nLines: {start+1}-{end}\n\n{chunk_text}"
             chunks.append({
                 "id": chunk_id,
                 "text": doc,
                 "payload": {
                     "document": doc,
                     "file": str(path),
+                    "rel_path": rel_path,
                     "repo": repo,
                     "language": language,
                     "line_start": start + 1,
@@ -350,7 +373,7 @@ def _embed_and_upsert(client: QdrantClient, embedder, all_chunks: list[dict]):
 
         points = [
             PointStruct(
-                id=int(c["id"][:8], 16),
+                id=int(c["id"][:16], 16),
                 vector={"fast-all-minilm-l6-v2": list(emb)},
                 payload=c["payload"],
             )
