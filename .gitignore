@@ -3,3 +3,4 @@ __pycache__/
 scripts/.venv/
 .env
 .qdrant-index-state.json
+.worktrees
